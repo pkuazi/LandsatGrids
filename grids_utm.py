@@ -4,19 +4,6 @@
 # @Module:
 #
 # @Author: zhaojianghua
-# @Date  : 2018-01-30 09:13
-#
-
-"""
-
-""" 
-
-#
-# -*-coding:utf-8 -*-
-#
-# @Module:
-#
-# @Author: zhaojianghua
 # @Date  : 2018-01-29 16:27
 #
 
@@ -25,6 +12,9 @@
 """
 
 import osr, ogr
+import fiona
+import numpy as np
+import os, json
 
 
 class GeomTrans(object):
@@ -107,7 +97,31 @@ def geojson2shp(geojson, shpdst, id):
         })
 
 
-import json
+def create_shapefile(shp_dst, geometry_list, proj):
+    dr = ogr.GetDriverByName("ESRI Shapefile")
+    ds = dr.CreateDataSource(shp_dst)
+
+    sr = osr.SpatialReference()
+    sr.SetFromUserInput(proj)
+
+    lyr = ds.CreateLayer("polygon", sr, ogr.wkbPolygon)
+    for geom in geometry_list:
+        ffd = ogr.FeatureDefn()
+
+        fgd = ogr.GeomFieldDefn()
+        fgd.name = "id"
+        fgd.type = ogr.wkbPolygon
+
+        ffd.AddGeomFieldDefn(fgd)
+        #
+        # feat = ogr.Feature(ffd)
+        # geom_p = ogr.Geometry(ogr.wkbPolygon)
+        # geom_p.AddGeometry(geom)
+        # feat.SetGeometry(geom_p)
+        feat = ogr.Feature()
+        feat.SetGeometry(geom)
+
+        lyr.CreateFeature(feat)
 
 
 class Shp2Json:
@@ -142,25 +156,79 @@ class Shp2Json:
         return geomjson_list
 
 
-import fiona
-
 if __name__ == '__main__':
-    shapefile = '/root/workspace/databox/CasGridEngine/griddata/grid_example/grid_50/grid_50.shp'
-    vector = fiona.open(shapefile, 'r')
+    data_path = '/root/workspace/databox/CasGridEngine/griddata/grid_example'
+    grid_50 = os.path.join(data_path, 'grid_50/grid_50.shp')
 
-    utm50_wgs = '/root/workspace/databox/CasGridEngine/griddata/grid_example/grid_50/grid_50_wgs.shp'
-
-    dr = ogr.GetDriverByName("ESRI Shapefile")
-    shp_ds = dr.Open(utm50_wgs)
-    layer = shp_ds.GetLayer(0)
-
-    feat_num = layer.GetFeatureCount()
+    vector = fiona.open(grid_50, 'r')
+    in_proj = vector.crs_wkt
+    wgs_proj = 'EPSG:4326'
+    utm2wgs = GeomTrans(in_proj, wgs_proj)
 
     china_zone = range(40, 61)
     for zone in china_zone:
+        dst_shp = os.path.join(data_path, 'wgs_grid_%s.shp' % zone)
+        utm_proj = "EPSG:326%s" % (zone)
+        print(utm_proj)
+        wgs2utm = GeomTrans(wgs_proj, utm_proj)
+
         mv_degree = (zone - 50) * 6
 
-        for i in range(feat_num):
-            feat = layer.GetFeature(i)
-            geom = feat.GetGeometryRef()
-            # move geom by mv_degree: to geojson, move, to geometry
+        # move geom by mv_degree: to geojson, move, to geometry
+        shp2json = Shp2Json(grid_50)
+        json_list = shp2json.shp2json_fiona()
+
+        # create the new shp
+        dr = ogr.GetDriverByName("ESRI Shapefile")
+        ds = dr.CreateDataSource(dst_shp)
+        sr = osr.SpatialReference()
+        sr.SetFromUserInput(wgs_proj)
+        # sr.SetFromUserInput(utm_proj)
+        lyr = ds.CreateLayer("polygon", sr, ogr.wkbPolygon)
+
+        # geom_list = []
+        for geo_json in json_list:
+            corner_points = geo_json['coordinates'][0]
+            # utm to wgs
+            corner_points_wgs = utm2wgs.transform_points(corner_points)
+
+            # delete those grids not between 80S to 84N
+            points_array = np.array(corner_points_wgs)
+            max_lat = np.max(points_array[:, 1])
+            min_lat = np.min(points_array[:, 1])
+
+            if max_lat > 84 or min_lat < -80:
+                continue
+
+            corner_points_moved = []
+            for point in corner_points_wgs:
+                # wgs move degree
+                x = point[0] + mv_degree
+                y = point[1]
+                corner_points_moved.append((x, y))
+
+            # wgs to utm
+            # corner_points_new_utm = wgs2utm.transform_points(corner_points_moved)
+
+            # write into one geometry
+            # geo_json_moved = {'coordinates':[corner_points_new_utm], 'type':'Polygon'}
+            # geo_json_moved = json.dumps(geo_json_moved)
+
+            geo_json_moved = {'coordinates': [corner_points_moved], 'type': 'Polygon'}
+            geo_json_moved = json.dumps(geo_json_moved)
+
+            # geom_json = json.dumps(geom_json)
+            geom = ogr.CreateGeometryFromJson(geo_json_moved)
+
+            ffd = ogr.FeatureDefn()
+            fgd = ogr.GeomFieldDefn()
+            fgd.name = "id"
+            fgd.type = ogr.wkbPolygon
+            ffd.AddGeomFieldDefn(fgd)
+            feat = ogr.Feature(ffd)
+            feat.SetGeometry(geom)
+            lyr.CreateFeature(feat)
+
+            # geom_list.append(geom)
+            # print(len(geom_list))
+            # create_shapefile(dst_shp, geom_list, utm_proj)
