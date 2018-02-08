@@ -157,17 +157,19 @@ class Shp2Json:
 
 
 if __name__ == '__main__':
-    data_path = '/root/workspace/databox/CasGridEngine/griddata/grid_example'
+    data_path = '/root/workspace/databox/CasGridEngine/griddata/grid_example/grid_addid'
     grid_50 = os.path.join(data_path, 'grid_50/grid_50.shp')
 
     vector = fiona.open(grid_50, 'r')
     in_proj = vector.crs_wkt
+
+
     wgs_proj = 'EPSG:4326'
     utm2wgs = GeomTrans(in_proj, wgs_proj)
 
     china_zone = range(40, 61)
     for zone in china_zone:
-        dst_shp = os.path.join(data_path, 'wgs_grid_%s.shp' % zone)
+
         utm_proj = "EPSG:326%s" % (zone)
         print(utm_proj)
         wgs2utm = GeomTrans(wgs_proj, utm_proj)
@@ -179,14 +181,43 @@ if __name__ == '__main__':
         json_list = shp2json.shp2json_fiona()
 
         # create the new shp
+        # 1 get driver
         dr = ogr.GetDriverByName("ESRI Shapefile")
+
+        # 2 create shapedata
+        dst_shp = os.path.join(data_path, 'wgs_grid_%s.shp' % zone)
+        if os.path.exists(dst_shp):
+            os.remove(dst_shp)
         ds = dr.CreateDataSource(dst_shp)
+
+        # 3 create spatial reference
         sr = osr.SpatialReference()
         sr.SetFromUserInput(wgs_proj)
-        # sr.SetFromUserInput(utm_proj)
-        lyr = ds.CreateLayer("polygon", sr, ogr.wkbPolygon)
 
-        # geom_list = []
+        # 4 create layer
+        layerName = os.path.splitext(os.path.split(dst_shp)[1])[0]
+        lyr = ds.CreateLayer(layerName, sr, ogr.wkbPolygon)
+        layerDefn = lyr.GetLayerDefn()
+
+        # 5 create a field
+        zoneField = ogr.FieldDefn('ZONE', ogr.OFTInteger)
+        lyr.CreateField(zoneField)
+
+        tileField = ogr.FieldDefn('TILE', ogr.OFTString)
+        lyr.CreateField(tileField)
+
+        idField = ogr.FieldDefn('GridID', ogr.OFTInteger)
+        lyr.CreateField(idField)
+
+        crsField = ogr.FieldDefn('proj4', ogr.OFTString)
+        lyr.CreateField(crsField)
+
+        rowField = ogr.FieldDefn('row', ogr.OFTInteger)
+        lyr.CreateField(rowField)
+
+        colField = ogr.FieldDefn('col', ogr.OFTInteger )
+        lyr.CreateField(colField)
+        # for each grid cell
         for geo_json in json_list:
             corner_points = geo_json['coordinates'][0]
             # utm to wgs
@@ -217,18 +248,18 @@ if __name__ == '__main__':
             geo_json_moved = {'coordinates': [corner_points_moved], 'type': 'Polygon'}
             geo_json_moved = json.dumps(geo_json_moved)
 
-            # geom_json = json.dumps(geom_json)
+            # 6 create polygon geometry
             geom = ogr.CreateGeometryFromJson(geo_json_moved)
 
-            ffd = ogr.FeatureDefn()
-            fgd = ogr.GeomFieldDefn()
-            fgd.name = "id"
-            fgd.type = ogr.wkbPolygon
-            ffd.AddGeomFieldDefn(fgd)
-            feat = ogr.Feature(ffd)
+            # 7 create feature
+            feat = ogr.Feature(layerDefn)
             feat.SetGeometry(geom)
+            feat.SetField('ZONE', zone)
+            feat.SetField('TILE', '00_00')
+
+            # 8 save feature
             lyr.CreateFeature(feat)
 
-            # geom_list.append(geom)
-            # print(len(geom_list))
-            # create_shapefile(dst_shp, geom_list, utm_proj)
+
+        # close datasource
+        ds.Destroy()
