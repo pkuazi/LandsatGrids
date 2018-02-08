@@ -4,32 +4,15 @@
 # @Author: zhaojianghua
 # @Date  : 2018-02-08 10:58
 #
-
-import datetime
-import json
-import math
-import os, sys
-import sqlite3
-
-from netCDF4 import num2date, date2num
-import netCDF4
-from netcdftime import utime
-
 import rasterio
-
-from databox.geomtrans import GeomTrans
-from databox.gridtools import get_grid_by_xy, adjust_bbox, crs_to_proj4, paste_ndarray
-import numpy as np
-
-
 from shapely.geometry import shape
 from affine import Affine
 
-def mask_image_by_geometry(geomjson, geomproj, raster, name):
-    print('the %s geometry' % name)
-    transform = GeomTrans(str(geomproj), str(raster.crs.wkt))
-    geojson_crs_transformed = transform.transform_points(geomjson['coordinates'][0])
-    geometry = shape({'coordinates': [geojson_crs_transformed], 'type': 'Polygon'})
+# use the grid with same crs(utm_zone) as the raster to clip
+def mask_image_by_grid(grid, raster, gridid):
+    print('the %s geometry' % gridid)
+
+    geometry = shape({'coordinates': [grid['coordinates']], 'type': 'Polygon'})
 
     bbox = raster.bounds
     extent = [[bbox.left, bbox.top], [bbox.left, bbox.bottom], [bbox.right, bbox.bottom], [bbox.right, bbox.top]]
@@ -50,11 +33,20 @@ def mask_image_by_geometry(geomjson, geomproj, raster, name):
     window = ((ur[0], ll[0] + 1), (ll[1], ur[1] + 1))
 
     out_data = raster.read(window=window)
-    with rasterio.open("/tmp/mask_%s.tif" % name, 'w', driver='GTiff', width=out_data.shape[2], height=out_data.shape[1], crs=raster.crs,
-                       transform=shifted_affine, dtype=np.uint16, nodata=256, count=raster.count,
+    with rasterio.open("/tmp/mask_%s.tif" % gridid, 'w', driver='GTiff', width=out_data.shape[2], height=out_data.shape[1], crs=raster.crs,
+                       transform=shifted_affine, dtype=rasterio.uint16, nodata=256, count=raster.count,
                        indexes=raster.indexes) as dst:
         # Write the src array into indexed bands of the dataset. If `indexes` is a list, the src must be a 3D array of matching shape. If an int, the src must be a 2D array.
         dst.write(out_data.astype(rasterio.uint16), indexes=raster.indexes)
+
+
+import datetime
+import json
+import math
+import os, sys
+import sqlite3
+
+import numpy as np
 
 class MetaDB(object):
     def __del__(self):
