@@ -103,7 +103,7 @@ def mask_image_by_geometry(geomjson, raster, name):
     # with rasterio.open("/tmp/%s" % name, 'w', driver='GTiff', width=out_data.shape[2], height=out_data.shape[1],crs=raster.crs,transform=shifted_affine, dtype=rasterio.uint16, nodata=256, count=raster.count,indexes=raster.indexes) as dst:
         # Write the src array into indexed bands of the dataset. If `indexes` is a list, the src must be a 3D array of matching shape. If an int, the src must be a 2D array.
         # dst.write(out_data.astype(rasterio.uint16), indexes=raster.indexes)
-    with rasterio.open("/tmp/%s" % name, 'w', driver='GTiff', width=out_data.shape[2], height=out_data.shape[1],
+    with rasterio.open(name, 'w', driver='GTiff', width=out_data.shape[2], height=out_data.shape[1],
                            crs=raster.crs, transform=shifted_affine, nodata=raster.nodata, count=1, dtype= rasterio.int16) as dst:
         dst.write(out_data)
 
@@ -130,7 +130,8 @@ def main(file):
     for grid in grid_dicts:
         print(grid['_source']['gridid'])
         utm_geometry = grid['_source']['utm_geometry']
-        mask_image_by_geometry(utm_geometry, raster, dataid + '_' + grid['_source']['gridid'] + '.tif')
+        tile_path = os.path.join('/tmp', dataid + '_' + grid['_source']['gridid'] + '.tif')
+        mask_image_by_geometry(utm_geometry, raster, tile_path)
 
 
 if __name__ == '__main__':
