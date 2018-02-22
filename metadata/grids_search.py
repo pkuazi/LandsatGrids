@@ -59,7 +59,7 @@ def query_grids(utm_zone, wgs_boundary):
     }
     query = json.dumps(filter)
 
-    res = es.search(index="grids", body=query, size=1000)
+    res = es.search(index="utm_grids_100km", body=query, size=1000)
     print(res['hits']['total'])
     grid_dict = (res['hits']['hits'])
 
@@ -69,7 +69,8 @@ def query_grids(utm_zone, wgs_boundary):
 
 
 def mask_image_by_geometry(geomjson, raster, name):
-    geomshape = ast.literal_eval(geomjson)
+    # geomshape = ast.literal_eval(geomjson)
+    geomshape = geomjson
     geometry = shape(geomshape)
     # get pixel coordinates of the geometry's bounding box,
     ll = raster.index(*geometry.bounds[0:2])  # lowerleft bounds[0:2] xmin, ymin
@@ -86,7 +87,7 @@ def mask_image_by_geometry(geomjson, raster, name):
     row_end = ll[0] + 1 if ll[0] > -1 else 0
     col_begin = ll[1] if ll[1] > 0 else 0
     col_end = ur[1] + 1 if ur[1] > -1 else 0
-    window = ((row_begin, row_end),(col_begin, col_end))
+    window = ((row_begin, row_end), (col_begin, col_end))
 
     # create an affine transform for the subset data
     t = raster.transform
@@ -96,15 +97,16 @@ def mask_image_by_geometry(geomjson, raster, name):
     print(name, out_data.size)
 
     # check whether the numpy array is empty or not?
-    if out_data.size == 0 or np.all(out_data==raster.nodata):
+    if out_data.size == 0 or np.all(out_data == raster.nodata):
         print('the grid does not intersect with the raster')
         return
 
-    # with rasterio.open("/tmp/%s" % name, 'w', driver='GTiff', width=out_data.shape[2], height=out_data.shape[1],crs=raster.crs,transform=shifted_affine, dtype=rasterio.uint16, nodata=256, count=raster.count,indexes=raster.indexes) as dst:
+        # with rasterio.open("/tmp/%s" % name, 'w', driver='GTiff', width=out_data.shape[2], height=out_data.shape[1],crs=raster.crs,transform=shifted_affine, dtype=rasterio.uint16, nodata=256, count=raster.count,indexes=raster.indexes) as dst:
         # Write the src array into indexed bands of the dataset. If `indexes` is a list, the src must be a 3D array of matching shape. If an int, the src must be a 2D array.
         # dst.write(out_data.astype(rasterio.uint16), indexes=raster.indexes)
     with rasterio.open(name, 'w', driver='GTiff', width=out_data.shape[2], height=out_data.shape[1],
-                           crs=raster.crs, transform=shifted_affine, nodata=raster.nodata, count=1, dtype= rasterio.int16) as dst:
+                       crs=raster.crs, transform=shifted_affine, nodata=raster.nodata, count=1,
+                       dtype=rasterio.int16) as dst:
         dst.write(out_data)
 
 
