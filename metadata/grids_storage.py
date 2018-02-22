@@ -10,7 +10,7 @@ write wgs_grids and utm_grids into elasticsearch
 """
 from elasticsearch import Elasticsearch
 import os
-import ogr
+import ogr, osr
 import json
 
 es = Elasticsearch(hosts=[{"host": "10.0.138.156", "port": 9200}, ])
@@ -24,93 +24,73 @@ mapping = {
                 "wgs_crs": {"type": "text"},
                 "utm_crs": {"type": "text"},
                 "wgs_geometry": {"type": "geo_shape"},
-                "utm_geometry": {"type": "text"}
+                # "utm_geometry": {"type": "text"}
+                "utm_geometry": {
+                    "properties": {
+                        "coordinates": {
+                            "type": "float"
+                        },
+                        "type": {
+                            "type": "text"
+                        }
+                    }
+                },
             }
         }
     }
 }
+
 mapping = json.dumps(mapping)
 print(mapping)
 
-
-def shape_to_elasticsearch(shapefile, doc):
-    ds = ogr.OpenShared(shapefile)
-    if ds is None:
-        return
-
-    layer = ds.GetLayerByIndex(0)
-    sr = layer.GetSpatialRef()
-    proj4 = sr.ExportToProj4()
-    for feat in layer:
-        geojson = feat.ExportToJson(as_object=True)
-        del geojson["id"]
-        del geojson["type"]
-        geojson.update(geojson["properties"])
-        del geojson["properties"]
-
-        geojson_l = {}
-        for key in geojson.keys():
-            geojson_l[key.lower()] = geojson[key]
-        geojson_l["crs"] = proj4
-
-        print(geojson_l)
-
-        es.index(index=index_name, doc_type="grids", body=geojson_l)
-
-
-def wgs_utm_into_es(wgs_shp, utm_shp, zone):
-    wgs_ds = ogr.OpenShared(wgs_shp)
-    if wgs_ds is None:
-        return
+def utm_grid_into_es(utm_shp, zone):
     utm_ds = ogr.OpenShared(utm_shp)
     if utm_ds is None:
+        print("shapefile not exists:", utm_shp)
         return
 
-    wgs_layer = wgs_ds.GetLayerByIndex(0)
     utm_layer = utm_ds.GetLayerByIndex(0)
 
-    wgs_sr = wgs_layer.GetSpatialRef()
-    wgs_proj4 = wgs_sr.ExportToProj4()
+    wgs_proj4 = "+proj=longlat +datum=WGS84 +no_defs "
+    wgs_sr = osr.SpatialReference()
+    wgs_sr.SetFromUserInput(wgs_proj4)
+
     utm_sr = utm_layer.GetSpatialRef()
     utm_proj4 = utm_sr.ExportToProj4()
 
-    for wgs_feat in wgs_layer:
-        geojson_l = {}
+    transform = osr.CoordinateTransformation(utm_sr, wgs_sr)
 
+    # utm_objs = {}
+    for utm_feat in utm_layer:
+        utm_feat_json = utm_feat.ExportToJson(as_object=True)
+        geom_properties = utm_feat_json['properties']
+        gridid_ = geom_properties['GridID']
+
+        utm_geom = utm_feat.geometry()
+        wgs_geom = utm_geom.Clone()
+        wgs_geom.Transform(transform)
+
+        utm_geom_json = json.loads(utm_geom.ExportToJson())
+        utm_geom_json["coordinates"][0].append(utm_geom_json["coordinates"][0][0])
+
+        wgs_geom_json = json.loads(wgs_geom.ExportToJson())
+        wgs_geom_json["coordinates"][0].append(wgs_geom_json["coordinates"][0][0])
+
+        geojson_l = {}
         geojson_l["zone"] = zone
         geojson_l['wgs_crs'] = wgs_proj4
         geojson_l['utm_crs'] = utm_proj4
 
-        featjson = wgs_feat.ExportToJson(as_object=True)
-        geojson_l['gridid'] = featjson['properties']['GridID']
-
-        line_form_coordinates = featjson['geometry']['coordinates'][0]
-        line_form_coordinates.append(featjson['geometry']['coordinates'][0][0])
-        geojson_l["wgs_geometry"] = {'type': featjson['geometry']['type'], 'coordinates': [line_form_coordinates]}
-
-        # wgs_geom = wgs_feat.GetGeometryRef()
-        # print(wgs_geom.GetGeometryType())
-        # if (wgs_geom.GetGeometryType() == ogr.wkbPolygon):
-        #     geojson_l["wgs_geometry"] = wgs_geom
-
-        # geojson_l["wgs_geometry"] = featjson['geometry']
-
-        for utm_feat in utm_layer:
-            utm_feat_json = utm_feat.ExportToJson(as_object=True)
-            if utm_feat_json['properties']['GridID'] == geojson_l['gridid']:
-                line_form_coordinates = utm_feat_json['geometry']['coordinates'][0]
-                line_form_coordinates.append(utm_feat_json['geometry']['coordinates'][0][0])
-                geojson_l["wgs_geometry"] = {'type': utm_feat_json['geometry']['type'], 'coordinates': [line_form_coordinates]}
-
-                # geojson_l['utm_geometry'] = utm_feat.GetGeometryRef()
-                break
+        geojson_l['gridid'] = gridid_
+        geojson_l["wgs_geometry"] = wgs_geom_json
+        geojson_l["utm_geometry"] = utm_geom_json
 
         print(geojson_l)
         es.index(index=index_name, doc_type="grids", body=geojson_l)
 
 
 if __name__ == '__main__':
-    index_name = "grids"
+    index_name = "utm_grids_100km"
     try:
         es.indices.delete(index=index_name)
     except:
@@ -122,6 +102,6 @@ if __name__ == '__main__':
 
     china_zone = range(40, 61)
     for zone in china_zone:
-        wgs_shp = os.path.join(data_path, 'wgs_grid_%s.shp' % zone)
+        # wgs_shp = os.path.join(data_path, 'wgs_grid_%s.shp' % zone)
         utm_shp = os.path.join(data_path, 'utm_grid_%s.shp' % zone)
-        wgs_utm_into_es(wgs_shp, utm_shp, zone)
+        utm_grid_into_es(utm_shp, zone)
