@@ -14,8 +14,7 @@ import json
 import os, sys
 from elasticsearch import Elasticsearch
 
-from netcdftime import utime
-import ogr, osr
+import ogr, osr, gdal
 import rasterio
 from rasterio.features import geometry_mask
 from affine import Affine
@@ -201,7 +200,37 @@ class DataBoxQuery(object):
         bandid   ：波段名称
         x, y：坐标,坐标对应投影信息默认为：EPSG:4326
         '''
-        pass
+        raster = gdal.OpenShared(tif_file)
+        if raster is None:
+            print("Failed to open file: " + tif_file)
+            sys.exit()
+        feat_proj = raster.GetProjectionRef()
+        gt = raster.GetGeoTransform()
+
+        # transform geographic coordinates of monitor points into projected coordinate system
+        inSpatialRef = osr.SpatialReference()
+        inSpatialRef.SetFromUserInput("EPSG:4326")
+        outSpatialRef = osr.SpatialReference()
+        outSpatialRef.SetFromUserInput(feat_proj)
+        transform = osr.CoordinateTransformation(inSpatialRef, outSpatialRef)
+
+        # point coordinate transformation
+        geom = ogr.Geometry(ogr.wkbPoint)
+        geom.AddPoint(x, y)
+        geom.Transform(transform)
+        x_c = geom.GetX()
+        y_c = geom.GetY()
+
+        # read feature value of the point from related data
+        col = int((x_c - gt[0]) / gt[1])
+        row = int((y_c - gt[3]) / gt[5])
+
+        # print(col, row)
+        if col < raster.RasterXSize and row < raster.RasterYSize:
+            return raster.ReadAsArray(col, row, 1, 1)[0][0]
+            # print(feat_value)
+        else:
+            return None
 
     def query_by_geom(self, wgs_geometry, tif_file, fmt="json"):
         '''
