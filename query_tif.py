@@ -214,6 +214,8 @@ class DataBoxQuery(object):
             }
 
         '''
+
+        # TODO: the format of wgs_geometry should be checked first
         if len(wgs_geometry) > GEOM_MAX_SIZE:
             raise EGeomTooLarge()
 
