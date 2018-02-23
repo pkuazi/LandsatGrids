@@ -11,14 +11,14 @@
 
 # -*- coding: utf-8 -*-
 import json
-import os
+import os, sys
 from elasticsearch import Elasticsearch
 
 from netcdftime import utime
-import ogr
+import ogr, osr
 import rasterio
 from rasterio.features import geometry_mask
-
+from affine import Affine
 from databox.geomtrans import GeomTrans
 from databox.netcdf4 import get_ncfile_handler, get_filter_files
 import numpy as np
@@ -87,9 +87,8 @@ class DataBoxQuery(object):
                               "%s/%s/%s/%s/%s" % (sensor, grid_y // 256, grid_y % 256, grid_x // 256, grid_x % 256))
         return ncfile
 
-
     @lru_cache(maxsize=256, timeout=300, args_base=1)
-    def info_by_bbox(self, minx, miny, maxx, maxy,start_time, end_time, fmt="json"):
+    def info_by_bbox(self, minx, miny, maxx, maxy, start_time, end_time, fmt="json"):
         '''
         返回空间范围所覆盖的数据切片信息，，返回：bands, crs, bbox, res, size, nctimes, geometry
         minx, miny, maxx, maxy：bbox范围, 对应投影信息默认为：EPSG:4326
@@ -100,8 +99,6 @@ class DataBoxQuery(object):
         query_polygon = {'type': 'Polygon', 'coordinates': [
             [[minx, maxy], [maxx, maxy], [maxx, miny], [minx, miny], [minx, maxy]]]}
         self.info_by_geom(query_polygon, start_time, end_time, fmt)
-
-
 
     @lru_cache(maxsize=256, timeout=300, args_base=1)
     def info_by_geom(self, geom, start_time, end_time, fmt="json"):
@@ -155,7 +152,7 @@ class DataBoxQuery(object):
         return tile_dict
 
     @lru_cache(maxsize=256, timeout=300, args_base=1)
-    def info_by_point(self, x,y,start_time, end_time, fmt="json"):
+    def info_by_point(self, x, y, start_time, end_time, fmt="json"):
         '''
         返回坐标点位置的数据切片信息，返回：bands, crs, bbox, res, size, nctimes
         sensor：数据产品名称
@@ -197,262 +194,87 @@ class DataBoxQuery(object):
         return tile_dict
 
     @lru_cache(maxsize=256, timeout=300, args_base=1)
-    def query_by_point(self, sensor, bandid, x0, y0, crs=None, times=None, fmt="json"):
+    def query_by_point(self, tif_file, x, y, fmt="json"):
         '''
         获取坐标点的数据。
-
-        sensor    ：数据产品名称
+        tif_file    ：数据产品
         bandid   ：波段名称
-        x, y：坐标
-        crs：坐标对应投影信息，如为：None，默认：EPSG:4326
-        times：TimeSlice 可识别的时间条件
+        x, y：坐标,坐标对应投影信息默认为：EPSG:4326
         '''
-        # read tif by coordinates
+        pass
 
-        x, y = GeomTrans(crs, EPSG_4326).transform_point([x0, y0])
-        grid_x, grid_y = get_grid_by_xy(x, y, self.gsize)
-
-        g_sensor = sensor.upper()
-
-        ncfile = self._get_ncfile(g_sensor, grid_y, grid_x, bandid)
-        if not os.path.exists(ncfile):
-            return {}, "json"
-
-        ncdataset_wrapper = get_ncfile_handler(ncfile)
-        ncdataset = ncdataset_wrapper()
-
-        grid_crs = ncdataset.grid_crs
-        grid_bounds = ncdataset.grid_bounds
-        grid_res = ncdataset.grid_res
-        grid_size = list(map(lambda a: int(a), ncdataset.grid_size))
-
-        x_proj, y_proj = GeomTrans(EPSG_4326, grid_crs).transform_point([x, y])
-
-        gminx, gminy, gmaxx, gmaxy = map_bbox_win(grid_bounds, [x_proj, y_proj, x_proj, y_proj, ], grid_res)
-
-        gymin1 = grid_size[1] - gmaxy
-        gymax1 = grid_size[1] - gminy
-
-        #         print(grid_x, grid_y)
-        #         print(gminx, gymin1, gmaxx, gymax1)
-
-        grid_values = ncdataset.variables["values"]
-        grid_times = ncdataset.variables["times"]
-
-        cdftime = utime(grid_times.units)
-
-        grid_dtype = grid_values.grid_dtype
-        np_otype = np.typeDict.get(grid_dtype)
-        fill_value = grid_values._FillValue
-
-        t_slices = []
-        if times is not None:
-            if isinstance(times, TimeSlice) == False:
-                times = TimeSlice(times)
-            try:
-                t_slices = times.get_slices(ncdataset, cdftime)
-            except ValueError as e:
-                raise ETimeSlice(str(e))
-
-        if len(t_slices) == 0:
-            grid_datas = grid_values[:, gymin1, gminx]
-            grid_datas_t = cdftime.num2date(grid_times[:])
-        else:
-            if len(t_slices[t_slices == True]) == 0:
-                grid_datas = np.ndarray(shape=(1, 1, 0), dtype=np_otype)
-                grid_datas_t = np.ndarray(shape=(0))
-            else:
-                grid_datas = grid_values[t_slices, gymin1, gminx]
-                grid_datas_t = cdftime.num2date(grid_times[t_slices])
-
-        ret = {
-            "times": [d.strftime(DATETIME_FMT) for d in grid_datas_t],
-            "nodata": float(fill_value),
-            "q_xy": [float(x0), float(y0)],
-            "g_xy": [gminx, gymin1],
-            "g_no": [grid_x, grid_y]
-        }
-
-        if fmt == "json":
-            ret["values"] = grid_datas.tolist()
-            return ret, "json"
-
-        ret["values"] = grid_datas
-        out_bytes = pickle.dumps(ret)
-        return out_bytes, "bytes"
-
-    def query_by_geom(self, sensor, bandid, mask_geom, grid_x, grid_y, times=None, fmt="json"):
+    def query_by_geom(self, wgs_geometry, tif_file, fmt="json"):
         '''
         获取空间范围内的数据，在调用该函数之前先调用 info_by_geom 或 info_by_bbox，将返回的结果中的 geometry 和 xy 属性作为参数。
 
-        sensor    ：数据产品名称
-        bandid   ：波段名称
         geom_info:矢量掩膜范围，必须包含 geometry 和 xy, geometry 必须为经纬度的 wkt 或 geojson，例如：
             {
-                'geometry': 'POLYGON ((115.0 40.222408112063,115.0 40.3643188487053,115.312252122152 40.5,115.5 40.5,115.5 40.3046486467168,115.387540328212 40.2805104337424,115.0 40.222408112063))',
+                'wgs_geometry': 'POLYGON ((115.0 40.222408112063,115.0 40.3643188487053,115.312252122152 40.5,115.5 40.5,115.5 40.3046486467168,115.387540328212 40.2805104337424,115.0 40.222408112063))',
                 'xy': [590, 260],
             }
-        times：TimeSlice 可识别的时间条件
-        '''
-        #         geom = geom_info.get("geometry", None)
-        #         grid_xy = geom_info.get("xy", None)
 
-        if len(mask_geom) > GEOM_MAX_SIZE:
+        '''
+        if len(wgs_geometry) > GEOM_MAX_SIZE:
             raise EGeomTooLarge()
 
-        return self._query_by_geom(sensor, bandid, mask_geom, grid_x, grid_y, times, fmt)
+        return self._query_by_geom(wgs_geometry, tif_file)
 
     @lru_cache(maxsize=256, timeout=300, args_base=1)
-    def _query_by_geom(self, query_polygon, start_time, end_time, sensor, bandid, fmt="json"):
+    def _query_by_geom(self, wgs_geometry, tif_file):
+        raster = rasterio.open(tif_file, 'r')
+        if raster is None:
+            print("Failed to open file: " + tif_file)
+            sys.exit()
+        raster_proj = raster.crs.wkt
 
-        es = Elasticsearch(hosts=[{"host": "10.0.138.156", "port": 9200}, ])
+        # transform geographic coordinates of monitor points into projected coordinate system
+        inSpatialRef = osr.SpatialReference()
+        inSpatialRef.SetFromUserInput("EPSG:4326")
+        outSpatialRef = osr.SpatialReference()
+        outSpatialRef.SetFromUserInput(raster_proj)
+        transform = osr.CoordinateTransformation(inSpatialRef, outSpatialRef)
 
-        query_polygon = {'type': 'Polygon', 'coordinates': [
-            [[112.180, 22.367], [112.629, 22.383], [112.709, 21.965], [112.196, 21.9], [112.180, 22.367]]]}
-        start_time = "20010117"
-        end_time = "20150101"
+        wgs_geometry.Transform(transform)
 
-        # query conditions include ['tile_path', 'wgs_grid', 'date_acquired', 'zone', 'wgs_crs', 'dataid', 'bandid', 'utm_grid', 'sensor', 'utm_crs',  'gridid']
-        bandid = bandid
-        sensor = sensor
-        query_polygon = query_polygon
-        start_time = start_time
-        end_time = end_time
+        minx, maxx, miny, maxy = wgs_geometry.GetEnvelope()
 
-        st_filter = {
-            "query": {
-                "bool": {
-                    "filter": [
-                        {"geo_shape": {
-                            "wgs_grid": {
-                                "shape": query_polygon,
-                                "relation": "intersects"
-                            }
-                        }},
-                        {'range': {'date_acquired': {'gt': start_time, 'lte': end_time, "format": "yyyyMMdd||yyyy"}}}
+        # get pixel coordinates of the geometry's bounding box,
+        ll = raster.index(minx, miny)  # lowerleft bounds[0:2] xmin, ymin
+        ur = raster.index(maxx, maxy)  # upperright bounds[2:4] xmax, ymax
 
-                    ]
-                }
-            }
-        }
+        # when the shapefile polygon is larger than the raster
+        row_begin = ur[0] if ur[0] > 0 else 0
+        row_end = ll[0] + 1 if ll[0] > -1 else 0
+        col_begin = ll[1] if ll[1] > 0 else 0
+        col_end = ur[1] + 1 if ur[1] > -1 else 0
+        window = ((row_begin, row_end), (col_begin, col_end))
 
-        query = json.dumps(st_filter)
+        out_data = raster.read(window=window)
 
-        res = es.search(index="landsat_tiles", body=query, size=1000)
-        print(res['hits']['total'])
-        tile_dict = (res['hits']['hits'])
+        # check whether the numpy array is empty or not?
+        if out_data.size == 0 or np.all(out_data == raster.nodata):
+            print('the grid does not intersect with the raster')
+            return
 
-        for grid in tile_dict:
-            print(grid['_source']['tile_path'], grid['_source']['wgs_grid'])
-            print(grid['_source'].keys())
-            print(grid['_source']['date_acquired'])
+        # create an affine transform for the subset data
+        t = raster.transform
+        shifted_affine = Affine(t.a, t.b, t.c + col_begin * t.a, t.d, t.e, t.f + row_begin * t.e)
 
-        geom_4326 = GeomTrans(EPSG_4326, EPSG_4326).transform_geom(
-            mask_geom)  # self._get_geom_4326(mask_geom, EPSG_4326)
-        if geom_4326.IsValid() == False:
-            raise EInvalidGeom()
+        out_data = raster.read(window=window)
 
-        g_sensor = sensor.upper()
-
-        ncfile = self._get_ncfile(g_sensor, grid_y, grid_x, bandid)
-        if not os.path.exists(ncfile):
-            return {}, "json"
-
-        ncdataset_wrapper = get_ncfile_handler(ncfile, )
-        ncdataset = ncdataset_wrapper()
-
-        grid_crs = ncdataset.grid_crs
-        grid_bounds = ncdataset.grid_bounds
-        grid_res = ncdataset.grid_res
-        grid_size = list(map(lambda a: int(a), ncdataset.grid_size))
-
-        geom_proj = GeomTrans(EPSG_4326, grid_crs).transform_geom(mask_geom)
-
-        xmin0, xmax0, ymin0, ymax0 = geom_proj.GetEnvelope()
-        g_win_bbox, g_win_size = adjust_bbox([xmin0, ymin0, xmax0, ymax0], grid_res, ref_bbox=grid_bounds)
-
-        xmin0, ymin0, xmax0, ymax0 = g_win_bbox
-        xsize, ysize = g_win_size
-
-        gminx, gminy, gmaxx, gmaxy = map_bbox_win(grid_bounds, g_win_bbox, grid_res)
-
-        gymin1 = grid_size[1] - gmaxy
-        gymax1 = grid_size[1] - gminy
-
-        if gminx < 0 or gminy < 0 or gmaxx > grid_size[0] or gmaxy > grid_size[1]:
-            return {}, "json"
-
-        grid_values = ncdataset.variables["values"]
-        grid_times = ncdataset.variables["times"]
-
-        cdftime = utime(grid_times.units)
-
-        t_slices = []
-        if times is not None:
-            if isinstance(times, TimeSlice) == False:
-                times = TimeSlice(times)
-            try:
-                t_slices = times.get_slices(ncdataset, cdftime)
-            except ValueError as e:
-                raise ETimeSlice(str(e))
-
-        grid_dtype = grid_values.grid_dtype
-        np_otype = np.typeDict.get(grid_dtype)
-        fill_value = grid_values._FillValue
-
-        if len(t_slices) == 0:
-            grid_datas = grid_values[:, gymin1:gymax1, gminx:gmaxx]
-            grid_datas_t = cdftime.num2date(grid_times[:])
-        else:
-            if len(t_slices[t_slices == True]) == 0:
-                out_image = grid_datas = np.ndarray(shape=(1, 1, 0), dtype=np_otype)
-                grid_datas_t = np.ndarray(shape=(0))
-            else:
-                grid_datas = grid_values[t_slices, gymin1:gymax1, gminx:gmaxx]
-                grid_datas_t = cdftime.num2date(grid_times[t_slices])
-
-        if len(grid_datas_t) > 0:
-            # begin apply geom mask
-            geom_json = json.loads(geom_proj.ExportToJson())
-            transform = rasterio.transform.from_bounds(xmin0, ymin0, xmax0, ymax0, xsize, ysize)
-
-            out_shape = grid_datas[0].shape
-
-            all_touched = False
-            invert = False
-
-            with rasterio.Env():
-                geom_mask_2d = geometry_mask([geom_json], out_shape, transform, all_touched=all_touched, invert=invert)
-
-            nc_mask = getattr(grid_datas, "mask", None)
-            nc_data = getattr(grid_datas, "data", grid_datas)
-
-            geom_mask_nd = np.ndarray(shape=grid_datas.shape, dtype=np.bool)
-            geom_mask_nd[:] = geom_mask_2d
-
-            if nc_mask is not None:
-                geom_mask = np.logical_or(geom_mask_nd, nc_mask)
-            else:
-                geom_mask = nc_mask
-
-            out_image = ma.masked_array(nc_data, mask=geom_mask, dtype=np_otype, fill_value=fill_value)
+        # check whether the numpy array is empty or not?
+        if out_data.size == 0 or np.all(out_data == raster.nodata):
+            print('the grid does not intersect with the raster')
+            return
 
         ret = {
-            "nodata": float(fill_value),
-            "shape": list(map(lambda a: int(a), out_image.shape)),
-            "times": [d.strftime(DATETIME_FMT) for d in grid_datas_t],
-            "g_bbox": [gminx, gymin1, gmaxx, gymax1],
-            "g_no": [grid_x, grid_y, ]
+            "nodata": float(raster.nodata),
+            "width": out_data.shape[2],
+            "height": out_data.shape[1],
+            "crs": raster.crs,
+            "transform": shifted_affine
         }
-
-        if fmt == "json":
-            ret["values"] = out_image.tolist(fill_value)
-            return ret, "json"
-
-        if getattr(out_image, "filled", None):
-            out_image = out_image.filled(fill_value)
-
-        ret["values"] = out_image
+        ret["values"] = out_data
 
         out_bytes = pickle.dumps(ret)
         return out_bytes, "bytes"
