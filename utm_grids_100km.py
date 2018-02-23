@@ -23,8 +23,21 @@ if __name__ == '__main__':
     json_list = []
     for feature in vector:
         json_list.append(feature)
-
     in_proj = vector.crs_wkt
+
+    # json_list = []
+    # dr = ogr.GetDriverByName("ESRI Shapefile")
+    # shp_ds = dr.Open(grid_50)
+    # layer = shp_ds.GetLayer(0)
+    # sr = layer.GetSpatialRef()
+    # in_proj = sr.ExportToWkt()
+    # feat_num = layer.GetFeatureCount()
+    # for i in range(feat_num):
+    #     feat = layer.GetFeature(i)
+    #     geom = feat.GetGeometryRef()
+    #
+    #     geojson = geom.ExportToWkt()
+    #     json_list.append(geojson)
 
     wgs_proj = 'EPSG:4326'
     utm2wgs = GeomTrans(in_proj, wgs_proj)
@@ -71,7 +84,10 @@ if __name__ == '__main__':
 
         # 5 create a field
         idField = ogr.FieldDefn('GridID', ogr.OFTString)
+        # geomField = ogr.GeomFieldDefn('the_geom', ogr.wkbPolygon)
         wgs_lyr.CreateField(idField)
+        # wgs_lyr.CreateGeomField(geomField)
+        # wgs_lyr.CreateField(geomField)
         utm_lyr.CreateField(idField)
 
         # for each grid cell
@@ -105,12 +121,14 @@ if __name__ == '__main__':
 
             # 6 create polygon geometry
             wgs_geom = ogr.CreateGeometryFromJson(wgs_geojson_moved)
+            wgs_geom_polygon = ogr.ForceToPolygon(wgs_geom)
             utm_geom = ogr.CreateGeometryFromJson(utm_geojson_moved)
 
             # 7 create feature
             wgs_feat = ogr.Feature(wgs_layerDefn)
             wgs_feat.SetGeometry(wgs_geom)
             wgs_feat.SetField('GridID', '%s_%s'%(zone,id))
+            # wgs_feat.SetGeomField('the_geom', wgs_geom)
 
             utm_feat = ogr.Feature(utm_layerDefn)
             utm_feat.SetGeometry(utm_geom)
