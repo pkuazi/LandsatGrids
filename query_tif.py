@@ -16,16 +16,14 @@ from elasticsearch import Elasticsearch
 
 import ogr, osr, gdal
 import rasterio
-from rasterio.features import geometry_mask
+# from rasterio.features import geometry_mask
 from affine import Affine
-from databox.geomtrans import GeomTrans
-from databox.netcdf4 import get_ncfile_handler, get_filter_files
+# from databox.geomtrans import GeomTrans
+
 import numpy as np
-import numpy.ma as ma
 
 from .CacheManager import lru_cache
-from .gridtools import get_grid_by_xy, map_bbox_win, adjust_bbox, crs_to_proj4
-from .gridtools import get_grids_by_bbox, get_grid_bbox, bbox_polygon
+
 
 try:
     import cPickle as pickle
@@ -58,11 +56,6 @@ class EGeomTooLarge(EDatabox):
         EDatabox.__init__(self, -3, "Geometry too large")
 
 
-class ETimeSlice(EDatabox):
-    def __init__(self, *args):
-        EDatabox.__init__(self, -4, " ".join(args))
-
-
 def _ndobject_to_str(o):
     if isinstance(o, str):
         return o
@@ -71,20 +64,22 @@ def _ndobject_to_str(o):
     return str(o)
 
 
-class DataBoxQuery(object):
+class LandsatTilesQuery(object):
     def __init__(self, root, gsize):
         self.root = root
         self.gsize = gsize
 
-    def _get_ncfile(self, sensor, grid_y, grid_x, bandid):
+    def _get_tile(self, sensor, grid_y, grid_x, bandid):
         ncfile = os.path.join(self.root, "%s/%s/%s/%s/%s/%s.nc" % (
             sensor, grid_y // 256, grid_y % 256, grid_x // 256, grid_x % 256, bandid))
         return ncfile
 
-    def _get_ncfile_path(self, sensor, grid_y, grid_x):
+    def _get_tile_path(self, sensor, grid_y, grid_x):
         ncfile = os.path.join(self.root,
                               "%s/%s/%s/%s/%s" % (sensor, grid_y // 256, grid_y % 256, grid_x // 256, grid_x % 256))
         return ncfile
+
+
 
     @lru_cache(maxsize=256, timeout=300, args_base=1)
     def info_by_bbox(self, minx, miny, maxx, maxy, start_time, end_time, fmt="json"):
@@ -193,7 +188,7 @@ class DataBoxQuery(object):
         return tile_dict
 
     @lru_cache(maxsize=256, timeout=300, args_base=1)
-    def query_by_point(self, tif_file, x, y, fmt="json"):
+    def query_by_point(self, tif_file, x, y):
         '''
         获取坐标点的数据。
         tif_file    ：数据产品
@@ -232,7 +227,7 @@ class DataBoxQuery(object):
         else:
             return None
 
-    def query_by_geom(self, wgs_geometry, tif_file, fmt="json"):
+    def query_by_geom(self, wgs_geometry, tif_file):
         '''
         获取空间范围内的数据，在调用该函数之前先调用 info_by_geom 或 info_by_bbox，将返回的结果中的 geometry 和 xy 属性作为参数。
 
