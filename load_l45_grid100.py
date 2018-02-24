@@ -30,7 +30,7 @@ mapping = {
             "properties": {
                 "dataid": {"type": "text"},
                 "bandid": {"type": "text"},
-                "date_acquired": {"type": "date"},
+                "date_acquired": {"type": "date", "format": "yyyyMMdd"},
                 "sensor": {"type": "text"},
                 "tile_path": {"type": "text"},
                 "gridid": {"type": "text"},
@@ -108,7 +108,7 @@ class GridUnitBuilder(object):
         print("process:", raster_file)
 
     def _get_tile(self, dataid, gridid):
-        tile_path = "/LANDSAT/L45TM/%s/%s/%s/%s/%s" % (self.row, self.path, self.year, self.ctime, self.bandid)
+        tile_path = "/LANDSAT/L45TM/%s/%s/%s/%s/%s" % (self.row, self.path, self.year, self.ctime, gridid)
         tile_file = os.path.join(tile_path, dataid + '_' + gridid + '.tif')
         return tile_file
 
@@ -217,9 +217,9 @@ def process(file):
 
     ctime = dataid[14:22]
     sensor = dataid[:2]
-    row = dataid[6:9]
-    path = dataid[10:13]
-    year = ctime[:4]
+    row = int(dataid[6:9])
+    path = int(dataid[10:13])
+    year = int(ctime[:4])
     gsize = 100
 
     gub = GridUnitBuilder(file, product, sensor, ctime, dataid, bandid, row, path, year, gsize)
@@ -246,7 +246,7 @@ if __name__ == '__main__':
 
     es.create(tile_index_name, mapping)
 
-    # Elasticsearch(hosts=[{"host": "10.0.138.156", "port": 9200}, ])
+    # es = Elasticsearch(hosts=[{"host": "10.0.138.156", "port": 9200}, ])
     # try:
     #     es.indices.delete(index=tile_index_name)
     # except:
