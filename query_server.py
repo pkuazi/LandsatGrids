@@ -34,6 +34,8 @@ import queue
 
 FutureTask = namedtuple('FutureTask', ['future', 'fn', 'args', 'kwargs'])
 
+es_host = "10.0.138.156"
+es_port = 9200
 
 class FuturesExecutor(object):
     _instance_lock = threading.Lock()
@@ -140,9 +142,10 @@ class QueryPointHandler(BaseHandler):
             x = float(self.get_argument("x"))
             y = float(self.get_argument("y"))
 
-        self.async_dojob(query.query_by_point, tif_file, x, y, callback=self.after_dojob)
+        self.async_dojob(query.read_by_point, tif_file, x, y, callback=self.after_dojob)
 
     #         cinfo, cfmt = query.query_by_point(ctype , bandid, x, y, crs, timeslice, fmt)
+    #         data = query.read_by_point(self, x, y, tif_file)
     #         after_dojob( ( cinfo, cfmt ) )
 
     get = post
@@ -166,7 +169,7 @@ class QueryGeomHandler(BaseHandler):
         if wgs_geometry is None or tif_file is None:
             raise web.HTTPError(400)
 
-        self.async_dojob(query.query_by_geom, ctype, wgs_geometry, tif_file, callback=self.after_dojob)
+        self.async_dojob(query.read_by_geom, ctype, wgs_geometry, tif_file, callback=self.after_dojob)
 
     #         cinfo, cfmt = query.query_by_geom(ctype, bandid , mask_geom, int(grid_x), int(grid_y) ,  timeslice, fmt)
     #         after_dojob( ( cinfo, cfmt ) )
@@ -178,7 +181,7 @@ class InfoWithHandler(BaseHandler):
     #     @gen.coroutine
     @web.asynchronous
     def post(self, product, ctype):
-        query = self.provider.get_query(product)
+        query = self.provider.get_query(es_host, es_port)
         fmt = self.get_argument("format", "json")
 
         start_time = self.get_argument("start_time")
@@ -189,15 +192,16 @@ class InfoWithHandler(BaseHandler):
         bbox = self.get_argument("bbox", None)
         if bbox:
             '''
+    (prefix + "/+info_query/+(\w+)/+(\w+)/?", InfoWithHandler, options),
     获取 bbox 的数据信息
-    http://127.0.0.1:8888/databox/info_with/LANDSAT/L45TM?bbox=117.513,40.013,118.5243,41.023&crs=
+    http://127.0.0.1:8888/databox/info_query/LANDSAT/L45TM?bbox=117.513,40.013,118.5243,41.023&crs=
     '''
             bbox = list(map(lambda a: float(a), bbox.split(",")))
             minx, miny, maxx, maxy = bbox
             if minx > maxx or miny > maxy:
                 raise web.HTTPError(400)
 
-            self.async_dojob(query.info_by_bbox, ctype, minx, miny, maxx, maxy, start_time, end_time, fmt,
+            self.async_dojob(query.query_by_bbox, ctype, minx, miny, maxx, maxy, start_time, end_time, fmt,
                              callback=self.after_dojob)
 
             #             cinfo, cfmt = query.info_by_bbox(self, minx, miny, maxx, maxy, start_time, end_time, fmt="json"):
@@ -208,9 +212,9 @@ class InfoWithHandler(BaseHandler):
         if geom:
             '''
     获取 geom 的数据信息
-    http://127.0.0.1:8888/databox/info_with/LANDSAT/L45TM?geom=&crs=
+    http://127.0.0.1:8888/databox/info_query/LANDSAT/L45TM?geom=&crs=
     '''
-            self.async_dojob(query.info_by_geom, geom, start_time, end_time, fmt, callback=self.after_dojob)
+            self.async_dojob(query.query_by_geom, geom, start_time, end_time, fmt, callback=self.after_dojob)
 
             #             cinfo = info_by_geom(self, geom, start_time, end_time, fmt="json"):
             #             after_dojob( ( cinfo, cfmt ) )
@@ -219,7 +223,7 @@ class InfoWithHandler(BaseHandler):
 
         '''
     获取 point 的数据信息
-    http://127.0.0.1:8888/databox/info_with/LANDSAT/L45TM?x=116.056832678626&y=39.5991427612245&crs=
+    http://127.0.0.1:8888/databox/info_query/LANDSAT/L45TM?x=116.056832678626&y=39.5991427612245&crs=
     '''
         pt = self.get_argument("pt", None)
         if pt:
@@ -231,7 +235,7 @@ class InfoWithHandler(BaseHandler):
 
         self.async_dojob(query.info_by_point,  x, y, start_time, end_time, fmt, callback=self.after_dojob)
 
-    #         cinfo, cfmt = query.info_by_point(self, x, y, start_time, end_time, fmt="json"):
+    #         cinfo, cfmt = query.query_by_point(self, x, y, start_time, end_time, fmt="json"):
     #         after_dojob( ( cinfo, cfmt ) )
 
     get = post
@@ -283,9 +287,9 @@ def make_app(pool_size=4):
     # the application object include a routing table that maps requests (a regular expression) to handlers
     prefix = "/+databox"
     return web.Application([
-        (prefix + "/+info_with/+(\w+)/+(\w+)/?", InfoWithHandler, options),
-        (prefix + "/+query_point/+(\w+)/+(\w+)/?", QueryPointHandler, options),
-        (prefix + "/+query_geom/+(\w+)/+(\w+)/?", QueryGeomHandler, options),
+        (prefix + "/+info_query/+(\w+)/+(\w+)/?", InfoWithHandler, options),
+        (prefix + "/+read_point/+(\w+)/+(\w+)/?", QueryPointHandler, options),
+        (prefix + "/+read_geom/+(\w+)/+(\w+)/?", QueryGeomHandler, options),
 
         (prefix + "/+metadata/+(\w+)/?", MetaDataHandler, options),
         (prefix + "/+metadata/+(\w+)/+(\w+)/?", MetaDataHandler, options),

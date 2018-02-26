@@ -40,12 +40,15 @@ class QueryProvider(object):
 
     @lru_cache(maxsize=0, timeout=300, args_base=1)
     def get_query(self, product):
-        typeMap = self.typemaps[product]
+        # typeMap = self.typemaps[product]
+        #
+        # root = typeMap["ROOT"]
+        # gsize = typeMap["GSIZE"]
+        # cgq = LandsatTilesQuery(root, gsize)
 
-        root = typeMap["ROOT"]
-        gsize = typeMap["GSIZE"]
-
-        cgq = LandsatTilesQuery(root, gsize)
+        es_host = "10.0.138.156"
+        es_port = 9200
+        cgq = LandsatTilesQuery(es_host, es_port)
         return cgq
 
 

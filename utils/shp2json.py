@@ -12,11 +12,17 @@ import osr, ogr
 import os, fiona
 import json
 import numpy as np
-from databox.utils.geomtrans import GeomTrans
+from geomtrans import GeomTrans
 
 class Shp2Json:
     def __init__(self, shapefile):
         self.shapefile = shapefile
+
+    def shp2json(self):
+        vector = fiona.open(self.shapefile, 'r')
+        geomjson_list = []
+        for feature in vector:
+            geomjson_list.append(feature)
 
     def shp2json_fiona(self):
         vector = fiona.open(self.shapefile, 'r')
@@ -51,9 +57,12 @@ if __name__ == '__main__':
 
     for zone in china_zone:
         shpfile = os.path.join(data_path, 'wgs_grid_%s.shp' % zone)
-        shp2json = Shp2Json(shpfile)
-        json_list = shp2json.shp2json_fiona()
-        print(json_list[0])
+
+        vector = fiona.open(shpfile, 'r')
+        json_list = []
+        for feature in vector:
+            json_list.append(feature)
+
         json_file = os.path.join('/root/workspace/databox/CasGridEngine/griddata/grid_example/grid_json', 'wgs_grid_%s.txt'%zone)
         with open(json_file, 'w') as outfile:
             json.dump(json_list, outfile)

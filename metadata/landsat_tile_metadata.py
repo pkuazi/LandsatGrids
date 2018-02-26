@@ -32,7 +32,14 @@ mapping = {
                 "wgs_crs": {"type": "text"},
                 "utm_crs": {"type": "text"},
                 "wgs_grid": {"type": "geo_shape"},
-                "utm_grid": {"type": "text"}
+                "utm_grid": {"properties": {
+                        "coordinates": {
+                            "type": "float"
+                        },
+                        "type": {
+                            "type": "text"
+                        }
+                    }}
             }
         }
     }
@@ -44,9 +51,13 @@ def main(file):
     # dataid for metadata
     items = file.split("/")
     dataid = items[-1].split(".")[0]
-    bandname = dataid[-2:]
+    bandname = 'B0'+dataid[-1:]
+
     time = dataid[14:22]
     sensor = dataid[:2]
+    row = int(dataid[6:9])
+    path = int(dataid[10:13])
+    year = int(time[:4])
 
     # query condition: zone of utm + bbox of wgs84
     raster = rasterio.open(file, 'r')
@@ -65,8 +76,12 @@ def main(file):
     for grid in grid_dicts:
         print(grid['_source']['gridid'])
         utm_geometry = grid['_source']['utm_geometry']
-        tile_path = os.path.join("/tmp", dataid + '_' + grid['_source']['gridid'] + '.tif')
-        mask_image_by_geometry(utm_geometry, raster, tile_path)
+        # tile_path = os.path.join("/tmp", dataid + '_' + grid['_source']['gridid'] + '.tif')
+
+        tile_path = "/LANDSAT/L45TM/%s/%s/%s/%s/%s" % (row, path, year, time, grid['_source']['gridid'])
+        tile_file = os.path.join(tile_path, dataid + '_' + grid['_source']['gridid'] + '.tif')
+
+        mask_image_by_geometry(utm_geometry, raster, tile_file)
 
         # metadata for the tile clipped from landsat by a grid
         geojson_l = {}
@@ -80,9 +95,10 @@ def main(file):
         geojson_l['wgs_crs'] = grid['_source']['wgs_crs']
         geojson_l['utm_crs'] = grid['_source']['utm_crs']
         geojson_l['wgs_grid'] = grid['_source']['wgs_geometry']
+        print(geojson_l['wgs_grid'])
         geojson_l['utm_grid'] = grid['_source']['utm_geometry']
 
-        print(geojson_l)
+        # print(geojson_l)
 
         es.index(index=index_name, doc_type="landsat45_tiles", body=geojson_l)
 

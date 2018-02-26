@@ -22,6 +22,7 @@ ES_host = "10.0.138.156"
 ES_port = 9200
 tile_index_name = "landsat_tiles"
 grid_index_name = "utm_grids_100km"
+
 # es = Elasticsearch(hosts=[{"host": "10.0.138.156", "port": 9200}, ])
 
 mapping = {
@@ -89,9 +90,9 @@ class MetaDB(object):
         self.es.indices.create(index=index_name, body=mapping)
 
 class GridUnitBuilder(object):
-    def __init__(self, raster_file, product, sensor, ctime, dataid, bandid, row, path, year, gsize):
+    def __init__(self, raster_file, grid_root, product, sensor, ctime, dataid, bandid, row, path, year, gsize):
         self.raster_file = raster_file
-
+        self.grid_root = grid_root
         self.product = product.upper()
         self.sensor = sensor.upper()
         self.ctime = ctime
@@ -108,7 +109,7 @@ class GridUnitBuilder(object):
         print("process:", raster_file)
 
     def _get_tile(self, dataid, gridid):
-        tile_path = "/LANDSAT/L45TM/%s/%s/%s/%s/%s" % (self.row, self.path, self.year, self.ctime, gridid)
+        tile_path = self.grid_root + "/%s/%s/%s/%s/%s/%s/%s" % (self.product, self.sensor, self.row, self.path, self.year, self.ctime, gridid)
         tile_file = os.path.join(tile_path, dataid + '_' + gridid + '.tif')
         return tile_file
 
@@ -133,7 +134,7 @@ class GridUnitBuilder(object):
         query = json.dumps(filter)
 
         res = self.metadb.es.search(index=grid_index_name, body=query, size=1000)
-        print(res['hits']['total'])
+        # print(res['hits']['total'])
         grid_dict = (res['hits']['hits'])
 
         # for grid in grid_dict:
@@ -208,7 +209,7 @@ class GridUnitBuilder(object):
             self.metadb.insert_tilemeta(tile_index_name, "landsat45_tiles", self.dataid, self.bandid, self.ctime,
                                         self.sensor, tile_file, gridid, utm_zone, wgs_crs, utm_crs, wgs_grid, utm_grid)
 
-def process(file):
+def process(file, root):
     # dataid for metadata
     items = file.split("/")
     product = "LANDSAT"
@@ -222,19 +223,20 @@ def process(file):
     year = int(ctime[:4])
     gsize = 100
 
-    gub = GridUnitBuilder(file, product, sensor, ctime, dataid, bandid, row, path, year, gsize)
+    gub = GridUnitBuilder(file,root, product, sensor, ctime, dataid, bandid, row, path, year, gsize)
     gub.save_tile_by_grid()
 
 
 def main():
     data_path = '/mnt/win/L45images'
+    root = "/mnt/LandsatGrids"
     # unzip all the compressed files before
     onlyfiles = [f for f in os.listdir(data_path) if os.path.isfile(os.path.join(data_path, f))]
 
     for file in onlyfiles:
         if file.endswith('.TIF') or file.endswith('.tif'):
             file = os.path.join(data_path, file)
-            process(file)
+            process(file, root)
 
 
 if __name__ == '__main__':

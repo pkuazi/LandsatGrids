@@ -300,6 +300,7 @@ class LandsatTilesQuery(object):
 
     @lru_cache(maxsize=256, timeout=300, args_base=1)
     def _read_by_geom(self, wgs_geometry, tif_file):
+        # geometry 必须为经纬度ogr.geometry
         raster = rasterio.open(tif_file, 'r')
         if raster is None:
             print("Failed to open file: " + tif_file)
@@ -373,9 +374,9 @@ if __name__ == '__main__':
     feat = layer.GetFeature(476)
     wgs_geometry = feat.GetGeometryRef()
 
-    # res = ltq.query_by_geom(wgs_geometry, start_time, end_time)
-    # tile_list = ltq.tile_list_from_es_res(res)
-    # data = ltq.read_by_point(wgs_geometry, tile_list[1])
+    res = ltq.query_by_geom(wgs_geometry, start_time, end_time)
+    tile_list = ltq.tile_list_from_es_res(res)
+    data = ltq.read_by_geom(wgs_geometry, tile_list[1])
 
     # test2: temporal_point query of landsat tiles and corresponding data value
     x = 115.514253
